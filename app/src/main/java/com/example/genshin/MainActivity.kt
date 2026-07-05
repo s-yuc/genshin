@@ -12,9 +12,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -26,11 +28,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.genshin.ui.theme.GenshinTheme
+import kotlinx.coroutines.launch
 import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
@@ -124,9 +128,7 @@ class MainActivity : ComponentActivity() {
                     if (text.isNotBlank()) return text
                 }
             }
-        } catch (e: Exception) {
-            Log.e("Genshin", "CSV export failed: ${e.message}")
-        }
+        } catch (e: Exception) { }
 
         return try {
             resolver.openInputStream(uri)?.use { stream ->
@@ -142,6 +144,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
     val results by viewModel.gachaResults.collectAsState()
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     if (results.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -152,13 +156,78 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
             )
         }
     } else {
-        LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(results) { result ->
-                GachaItemCard(result)
+        Box(modifier = modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 40.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(results) { result ->
+                    GachaItemCard(result)
+                }
+            }
+
+            // ドラッグ可能なシークバー
+            val totalItems = results.size
+            if (totalItems > 0) {
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .align(Alignment.CenterEnd)
+                        .width(40.dp) // タッチ判定を広めに確保
+                        .pointerInput(totalItems) {
+                            detectDragGestures { change, _ ->
+                                change.consume()
+                                val dragY = change.position.y
+                                val trackHeight = size.height.toFloat()
+                                if (trackHeight > 0) {
+                                    val scrollPercentage = (dragY / trackHeight).coerceIn(0f, 1f)
+                                    val targetIndex = (scrollPercentage * totalItems).toInt()
+                                    coroutineScope.launch {
+                                        listState.scrollToItem(targetIndex.coerceIn(0, totalItems - 1))
+                                    }
+                                }
+                            }
+                        }
+                ) {
+                    val layoutInfo = listState.layoutInfo
+                    val visibleItemsCount = layoutInfo.visibleItemsInfo.size
+
+                    if (totalItems > visibleItemsCount && visibleItemsCount > 0) {
+                        val firstVisibleIndex = listState.firstVisibleItemIndex
+                        
+                        // バーの高さ（表示割合、最低でも40dp程度の長さを確保）
+                        val barHeightFactor = (visibleItemsCount.toFloat() / totalItems.toFloat()).coerceAtLeast(0.1f)
+                        val barHeight = maxHeight * barHeightFactor
+                        
+                        // バーの垂直位置
+                        val scrollableItems = (totalItems - visibleItemsCount).coerceAtLeast(1)
+                        val barOffset = (maxHeight - barHeight) * (firstVisibleIndex.toFloat() / scrollableItems.toFloat()).coerceIn(0f, 1f)
+
+                        // 背景（トラック）
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .fillMaxHeight()
+                                .width(6.dp)
+                                .background(Color.Gray.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
+                        )
+
+                        // つまみ（シークバー本体）
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .offset(y = barOffset)
+                                .width(12.dp)
+                                .height(barHeight)
+                                .background(
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                        )
+                    }
+                }
             }
         }
     }
