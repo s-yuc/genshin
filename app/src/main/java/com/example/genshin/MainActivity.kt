@@ -2,6 +2,7 @@ package com.example.genshin
 
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.genshin.ui.theme.GenshinTheme
+import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
     private val viewModel: GachaViewModel by viewModels()
@@ -39,21 +41,18 @@ class MainActivity : ComponentActivity() {
                 var showImportDialog by remember { mutableStateOf(false) }
                 val context = LocalContext.current
 
-                // Googleドライブ等からファイルを選択するランチャー
+                // ファイル選択用のランチャー (Googleドライブ対応)
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
                     uri?.let {
-                        try {
-                            val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
-                                reader.readText()
-                            }
-                            if (!content.isNullOrBlank()) {
-                                viewModel.importGachaResults(content)
-                                showImportDialog = false
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                        val content = readTextFromUri(it)
+                        if (!content.isNullOrBlank()) {
+                            viewModel.importGachaResults(content)
+                            Toast.makeText(context, "取り込みが完了しました", Toast.LENGTH_SHORT).show()
+                            showImportDialog = false
+                        } else {
+                            Toast.makeText(context, "ファイルの読み取りに失敗しました。CSV形式に書き出してから試してください。", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -87,18 +86,53 @@ class MainActivity : ComponentActivity() {
                                 showImportDialog = false
                             },
                             onPickFile = {
-                                // スプレッドシート関連のMIMEタイプを指定してドライブ等を起動
+                                // GoogleスプレッドシートやCSVを選択可能にする
                                 filePickerLauncher.launch(arrayOf(
                                     "text/csv",
                                     "text/comma-separated-values",
                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     "application/vnd.ms-excel",
-                                    "text/plain"
+                                    "application/vnd.google-apps.spreadsheet",
+                                    "text/plain",
+                                    "*/*"
                                 ))
                             }
                         )
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Googleスプレッドシートなどの仮想ドキュメントを読み込むための処理。
+     * 仮想ファイルの場合はCSVとしてストリームを取得し、テキストとして読み取ります。
+     */
+    private fun readTextFromUri(uri: Uri): String? {
+        val resolver = contentResolver
+        return try {
+            // スプレッドシートをCSV形式で取得できるか確認
+            val streamTypes = resolver.getStreamTypes(uri, "text/*")
+            val isVirtual = streamTypes?.contains("text/csv") == true || 
+                        streamTypes?.contains("text/comma-separated-values") == true
+
+            val inputStream: InputStream? = if (isVirtual) {
+                // CSV形式でのエクスポートを試みる
+                resolver.openTypedAssetFileDescriptor(uri, "text/csv", null)?.createInputStream()
+                    ?: resolver.openTypedAssetFileDescriptor(uri, "text/comma-separated-values", null)?.createInputStream()
+            } else {
+                // 通常のファイルとして開く
+                resolver.openInputStream(uri)
+            }
+
+            inputStream?.bufferedReader()?.use { it.readText() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // 最終手段：通常のインプットストリームとして試行
+            try {
+                resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            } catch (e2: Exception) {
+                null
             }
         }
     }
@@ -213,7 +247,7 @@ fun ImportDialog(
         text = {
             Column {
                 Text(
-                    text = "Googleドライブ等のスプレッドシート(CSV)を選択するか、内容を直接貼り付けてください。",
+                    text = "Googleドライブ等のスプレッドシートを選択するか、内容を直接貼り付けてください。",
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
@@ -225,7 +259,7 @@ fun ImportDialog(
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("スプレッドシート / CSVを選択")
+                    Text("Googleドライブ / ファイルを選択")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
