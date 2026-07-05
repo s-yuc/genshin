@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -19,11 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,29 +47,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             GenshinTheme {
                 var showImportDialog by remember { mutableStateOf(false) }
+                var isSearchVisible by remember { mutableStateOf(false) }
                 val context = LocalContext.current
                 val sortOrder by viewModel.sortOrder.collectAsState()
                 val countMode by viewModel.countMode.collectAsState()
+                val searchQuery by viewModel.searchQuery.collectAsState()
 
-                // ファイル選択用のランチャー
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
                     if (uri == null) return@rememberLauncherForActivityResult
-
                     val content = readTextFromUri(uri)
-                    when (content) {
-                        "ERROR_EXCEL_BINARY" -> {
-                            Toast.makeText(context, "Excel(.xlsx)は直接読み込めません。Googleドライブ上で「Googleスプレッドシートとして保存」したファイルを選択するか、CSVで保存し直してください。", Toast.LENGTH_LONG).show()
-                        }
-                        null, "" -> {
-                            Toast.makeText(context, "取得失敗。左上のメニューから『Googleドライブ』を直接選び、ファイルを選択してみてください。", Toast.LENGTH_LONG).show()
-                        }
-                        else -> {
-                            viewModel.importGachaResults(content)
-                            Toast.makeText(context, "インポート完了しました", Toast.LENGTH_SHORT).show()
-                            showImportDialog = false
-                        }
+                    if (!content.isNullOrBlank()) {
+                        viewModel.importGachaResults(content)
+                        Toast.makeText(context, "インポート完了しました", Toast.LENGTH_SHORT).show()
+                        showImportDialog = false
                     }
                 }
 
@@ -80,21 +69,52 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         CenterAlignedTopAppBar(
-                            title = { Text("原神ガチャ記録", fontWeight = FontWeight.ExtraBold) },
+                            title = {
+                                if (isSearchVisible) {
+                                    TextField(
+                                        value = searchQuery,
+                                        onValueChange = { viewModel.updateSearchQuery(it) },
+                                        placeholder = { Text("武器・キャラを検索...") },
+                                        singleLine = true,
+                                        colors = TextFieldDefaults.colors(
+                                            focusedContainerColor = Color.Transparent,
+                                            unfocusedContainerColor = Color.Transparent,
+                                            focusedIndicatorColor = Color.Transparent,
+                                            unfocusedIndicatorColor = Color.Transparent
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    Text("原神ガチャ記録", fontWeight = FontWeight.ExtraBold)
+                                }
+                            },
+                            navigationIcon = {
+                                if (isSearchVisible) {
+                                    IconButton(onClick = { 
+                                        isSearchVisible = false
+                                        viewModel.updateSearchQuery("") 
+                                    }) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "閉じる")
+                                    }
+                                }
+                            },
                             actions = {
-                                // カウントモード切り替えボタン
+                                if (!isSearchVisible) {
+                                    IconButton(onClick = { isSearchVisible = true }) {
+                                        Icon(Icons.Default.Search, contentDescription = "検索")
+                                    }
+                                }
                                 IconButton(onClick = { viewModel.toggleCountMode() }) {
                                     Icon(
                                         imageVector = if (countMode == GachaCountMode.PITY) Icons.Default.Refresh else Icons.Default.List,
-                                        contentDescription = "カウントモード切替"
+                                        contentDescription = "モード切替"
                                     )
                                 }
-                                // ソート順を切り替えるボタン
                                 IconButton(onClick = { viewModel.toggleSortOrder() }) {
                                     Icon(
                                         imageVector = if (sortOrder == SortOrder.DESCENDING) 
                                             Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                        contentDescription = "ソート切り替え"
+                                        contentDescription = "ソート切替"
                                     )
                                 }
                             },
@@ -121,9 +141,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.importGachaResults(data)
                                 showImportDialog = false
                             },
-                            onPickFile = {
-                                filePickerLauncher.launch(arrayOf("*/*"))
-                            }
+                            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) }
                         )
                     }
                 }
@@ -141,15 +159,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } catch (e: Exception) { }
-
         return try {
-            resolver.openInputStream(uri)?.use { stream ->
-                val text = stream.bufferedReader().use { it.readText() }
-                if (text.startsWith("PK")) "ERROR_EXCEL_BINARY" else text
-            }
-        } catch (e: Exception) {
-            null
-        }
+            resolver.openInputStream(uri)?.use { it.bufferedReader().use { r -> r.readText() } }
+        } catch (e: Exception) { null }
     }
 }
 
@@ -163,11 +175,7 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (results.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "履歴がありません。「+」からデータをインポートしてください。",
-                    color = Color.Gray,
-                    modifier = Modifier.padding(32.dp)
-                )
+                Text(text = "履歴がありません。", color = Color.Gray)
             }
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -182,13 +190,9 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
                     }
                 }
 
-                // 高速スクロール用シークバー
                 val totalItems = results.size
                 BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .align(Alignment.CenterEnd)
-                        .width(44.dp)
+                    modifier = Modifier.fillMaxHeight().align(Alignment.CenterEnd).width(44.dp)
                         .pointerInput(totalItems) {
                             detectDragGestures { change, _ ->
                                 change.consume()
@@ -225,12 +229,10 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
 @Composable
 fun GachaItemCard(result: GachaResult, countMode: GachaCountMode) {
     val (gradientColors, starColor) = when (result.rarity) {
-        5 -> listOf(Color(0xFFFFB74D), Color(0xFFF57C00)) to Color(0xFFFFEB3B) // 橙色
-        4 -> listOf(Color(0xFFBA68C8), Color(0xFF7B1FA2)) to Color(0xFFE040FB) // 紫色
+        5 -> listOf(Color(0xFFFFB74D), Color(0xFFF57C00)) to Color(0xFFFFEB3B)
+        4 -> listOf(Color(0xFFBA68C8), Color(0xFF7B1FA2)) to Color(0xFFE040FB)
         else -> listOf(Color(0xFF90A4AE), Color(0xFF546E7A)) to Color(0xFFCFD8DC)
     }
-
-    // モードに応じて表示する数値を切り替え
     val displayCount = if (countMode == GachaCountMode.PITY) result.pityCount else result.totalCount
 
     Card(

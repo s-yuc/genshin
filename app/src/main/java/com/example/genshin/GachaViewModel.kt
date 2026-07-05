@@ -16,14 +16,22 @@ class GachaViewModel : ViewModel() {
     private val _rawGachaResults = MutableStateFlow<List<GachaResult>>(emptyList())
     private val _sortOrder = MutableStateFlow(SortOrder.DESCENDING)
     private val _countMode = MutableStateFlow(GachaCountMode.PITY)
+    private val _searchQuery = MutableStateFlow("")
     
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
     val countMode: StateFlow<GachaCountMode> = _countMode.asStateFlow()
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    val gachaResults: StateFlow<List<GachaResult>> = combine(_rawGachaResults, _sortOrder) { results, order ->
+    val gachaResults: StateFlow<List<GachaResult>> = combine(_rawGachaResults, _sortOrder, _searchQuery) { results, order, query ->
+        val filtered = if (query.isBlank()) {
+            results
+        } else {
+            results.filter { it.type.contains(query, ignoreCase = true) || it.name.contains(query, ignoreCase = true) }
+        }
+        
         when (order) {
-            SortOrder.ASCENDING -> results.sortedBy { it.totalCount }
-            SortOrder.DESCENDING -> results.sortedByDescending { it.totalCount }
+            SortOrder.ASCENDING -> filtered.sortedBy { it.totalCount }
+            SortOrder.DESCENDING -> filtered.sortedByDescending { it.totalCount }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -45,6 +53,10 @@ class GachaViewModel : ViewModel() {
         } else {
             GachaCountMode.PITY
         }
+    }
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
     }
 
     fun importGachaResults(input: String) {
@@ -77,7 +89,7 @@ class GachaViewModel : ViewModel() {
                 val col4 = if (parts.size >= 4) parts[3] else ""
 
                 var type: String; var name: String; var date: String
-                if (col2.contains(Regex("キャラ|武器|キャラクター"))) {
+                if (col2.contains(Regex("キャラ|武器|カテゴリー"))) {
                     if (col3.isBlank()) continue
                     type = col2; name = col3; date = col4
                 } else {
@@ -92,7 +104,7 @@ class GachaViewModel : ViewModel() {
                     name.contains(Regex("雷電|ナヒーダ|鍾離|フリーナ|ヌヴィレット|神里|万葉|胡桃|夜蘭|エウルア|シロネン|ムアラニ|キィニチ|マーヴィカ|クロリンデ|ナヴィア|リオセスリ|千織|召使|アルレッキーノ|エミリエ|ティナリ|刻晴|モナ|ジン|ディルック|七七|ネフェル|魈|甘雨|白朮|セノ|リネ|放浪者")) -> 5
                     checkText.contains(Regex("[★☆]4|[★☆]４|\\(4\\)|\\(４\\)|\\[4\\]|\\[４\\]")) ||
                     checkText.contains(Regex("(?<!\\d)[4４](?!連)(?!\\d)")) ||
-                    name.contains(Regex("ベネット|行秋|香菱|久岐忍|シュヴルーズ|ファルザン|カチーナ|嘉明|セトス|キャンディス|ヨォーヨ|シャルロット|リネット|フレミネ|綺良々|ミカ|レイラ|ドリー|コレイ|久岐忍|雲菫|ゴロー|トーマ|早柚|サラ|ロサリア|煙緋|ディオナ|辛炎|スクロース|重雲|北斗|フィッシュル|凝光|バーバラ|アンバー|リサ|ガイア|キョーコ|ノエル")) -> 4
+                    name.contains(Regex("ベネット|行秋|香菱|久岐忍|シュヴルーズ|ファルザン|カチーナ|嘉明|セトス|キャンディス|ヨォーヨ|シャルロット|リネット|フレミネ|綺良々|ミカ|レイラ|ドリー|コレイ|久岐忍|雲菫|ゴロー|トーマ|早柚|サラ|ロサリア|煙緋|ディオナ|辛炎|スクロース|重雲|北斗|フィッシュル|凝光|バーバラ|アンバー|リサ|ガイア|レザー|ノエル|キョーコ")) -> 4
                     else -> 3
                 }
 
