@@ -39,17 +39,21 @@ class MainActivity : ComponentActivity() {
                 var showImportDialog by remember { mutableStateOf(false) }
                 val context = LocalContext.current
 
-                // ファイルピッカーのランチャー設定
+                // Googleドライブ等からファイルを選択するランチャー
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
                     uri?.let {
-                        val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
-                            reader.readText()
-                        }
-                        if (content != null) {
-                            viewModel.importGachaResults(content)
-                            showImportDialog = false
+                        try {
+                            val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
+                                reader.readText()
+                            }
+                            if (!content.isNullOrBlank()) {
+                                viewModel.importGachaResults(content)
+                                showImportDialog = false
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
                     }
                 }
@@ -83,8 +87,14 @@ class MainActivity : ComponentActivity() {
                                 showImportDialog = false
                             },
                             onPickFile = {
-                                // CSVやテキストファイルを選択可能にする
-                                filePickerLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+                                // スプレッドシート関連のMIMEタイプを指定してドライブ等を起動
+                                filePickerLauncher.launch(arrayOf(
+                                    "text/csv",
+                                    "text/comma-separated-values",
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    "application/vnd.ms-excel",
+                                    "text/plain"
+                                ))
                             }
                         )
                     }
@@ -121,11 +131,10 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun GachaItemCard(result: GachaResult) {
-    // レアリティに応じた背景グラデーションと星の色
     val (gradientColors, starColor) = when (result.rarity) {
-        5 -> listOf(Color(0xFFF3D17E), Color(0xFFC07E33)) to Color(0xFFFFEB3B) // 金色
-        4 -> listOf(Color(0xFFA279C3), Color(0xFF6E4A8E)) to Color(0xFFE040FB) // 紫色
-        else -> listOf(Color(0xFF7B8E9B), Color(0xFF515969)) to Color(0xFFB0BEC5) // 青/灰
+        5 -> listOf(Color(0xFFF3D17E), Color(0xFFC07E33)) to Color(0xFFFFEB3B)
+        4 -> listOf(Color(0xFFA279C3), Color(0xFF6E4A8E)) to Color(0xFFE040FB)
+        else -> listOf(Color(0xFF7B8E9B), Color(0xFF515969)) to Color(0xFFB0BEC5)
     }
 
     Card(
@@ -191,7 +200,11 @@ fun GachaItemCard(result: GachaResult) {
 }
 
 @Composable
-fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit, onPickFile: () -> Unit) {
+fun ImportDialog(
+    onDismiss: () -> Unit,
+    onImport: (String) -> Unit,
+    onPickFile: () -> Unit
+) {
     var text by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -200,28 +213,32 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit, onPickFile: 
         text = {
             Column {
                 Text(
-                    text = "スプレッドシートやCSVからコピーして貼り付けるか、ファイルを選択してください。",
+                    text = "Googleドライブ等のスプレッドシート(CSV)を選択するか、内容を直接貼り付けてください。",
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 
                 Button(
                     onClick = onPickFile,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("ファイルを選択 (CSV等)")
+                    Text("スプレッドシート / CSVを選択")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(16.dp))
+                
                 Text("または直接貼り付け:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 TextField(
                     value = text,
                     onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
                     placeholder = { Text("例:\n75\tキャラ\t雷電将軍\t2024-01-01") }
                 )
             }
