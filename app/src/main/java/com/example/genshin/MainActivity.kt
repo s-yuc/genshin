@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -147,35 +148,36 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    if (results.isEmpty()) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "履歴がありません。「+」からデータをインポートしてください。",
-                color = Color.Gray,
-                modifier = Modifier.padding(32.dp)
-            )
-        }
-    } else {
-        Box(modifier = modifier.fillMaxSize()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 40.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(results) { result ->
-                    GachaItemCard(result)
-                }
+    // 画面全体の背景色は標準色に固定
+    Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (results.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "履歴がありません。「+」からデータをインポートしてください。",
+                    color = Color.Gray,
+                    modifier = Modifier.padding(32.dp)
+                )
             }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 44.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(results) { result ->
+                        GachaItemCard(result)
+                    }
+                }
 
-            // ドラッグ可能なシークバー
-            val totalItems = results.size
-            if (totalItems > 0) {
+                // 高速スクロール用シークバー
+                val totalItems = results.size
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxHeight()
                         .align(Alignment.CenterEnd)
-                        .width(40.dp) // タッチ判定を広めに確保
+                        .width(44.dp)
                         .pointerInput(totalItems) {
                             detectDragGestures { change, _ ->
                                 change.consume()
@@ -193,39 +195,15 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
                 ) {
                     val layoutInfo = listState.layoutInfo
                     val visibleItemsCount = layoutInfo.visibleItemsInfo.size
-
                     if (totalItems > visibleItemsCount && visibleItemsCount > 0) {
                         val firstVisibleIndex = listState.firstVisibleItemIndex
-                        
-                        // バーの高さ（表示割合、最低でも40dp程度の長さを確保）
-                        val barHeightFactor = (visibleItemsCount.toFloat() / totalItems.toFloat()).coerceAtLeast(0.1f)
+                        val barHeightFactor = (visibleItemsCount.toFloat() / totalItems.toFloat()).coerceAtLeast(0.15f)
                         val barHeight = maxHeight * barHeightFactor
-                        
-                        // バーの垂直位置
-                        val scrollableItems = (totalItems - visibleItemsCount).coerceAtLeast(1)
-                        val barOffset = (maxHeight - barHeight) * (firstVisibleIndex.toFloat() / scrollableItems.toFloat()).coerceIn(0f, 1f)
+                        val scrollableRange = (totalItems - visibleItemsCount).coerceAtLeast(1)
+                        val barOffset = (maxHeight - barHeight) * (firstVisibleIndex.toFloat() / scrollableRange.toFloat()).coerceIn(0f, 1f)
 
-                        // 背景（トラック）
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .fillMaxHeight()
-                                .width(6.dp)
-                                .background(Color.Gray.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
-                        )
-
-                        // つまみ（シークバー本体）
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .offset(y = barOffset)
-                                .width(12.dp)
-                                .height(barHeight)
-                                .background(
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                        )
+                        Box(modifier = Modifier.align(Alignment.Center).fillMaxHeight(0.95f).width(4.dp).background(Color.Gray.copy(alpha = 0.1f), RoundedCornerShape(2.dp)))
+                        Box(modifier = Modifier.align(Alignment.TopCenter).offset(y = barOffset).width(10.dp).height(barHeight).background(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), shape = RoundedCornerShape(5.dp)))
                     }
                 }
             }
@@ -235,10 +213,11 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun GachaItemCard(result: GachaResult) {
+    // レアリティに応じたカードの背景色 (橙色と紫色)
     val (gradientColors, starColor) = when (result.rarity) {
-        5 -> listOf(Color(0xFFF3D17E), Color(0xFFC07E33)) to Color(0xFFFFEB3B)
-        4 -> listOf(Color(0xFFA279C3), Color(0xFF6E4A8E)) to Color(0xFFE040FB)
-        else -> listOf(Color(0xFF7B8E9B), Color(0xFF515969)) to Color(0xFFB0BEC5)
+        5 -> listOf(Color(0xFFFFB74D), Color(0xFFF57C00)) to Color(0xFFFFEB3B) // 橙色
+        4 -> listOf(Color(0xFFBA68C8), Color(0xFF7B1FA2)) to Color(0xFFE040FB) // 紫色
+        else -> listOf(Color(0xFF90A4AE), Color(0xFF546E7A)) to Color(0xFFCFD8DC) // 青灰色
     }
 
     Card(
@@ -246,14 +225,8 @@ fun GachaItemCard(result: GachaResult) {
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Box(
-            modifier = Modifier.background(Brush.horizontalGradient(gradientColors)).padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Box(modifier = Modifier.background(Brush.horizontalGradient(gradientColors)).padding(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = result.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
@@ -282,7 +255,7 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit, onPickFile: 
         title = { Text("データの取り込み") },
         text = {
             Column {
-                Text(text = "Googleドライブ等のスプレッドシートを選択するか、内容を直接貼り付けてください。", fontSize = 12.sp)
+                Text(text = "スプレッドシートを選択するか、内容を直接貼り付けてください。", fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = onPickFile, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
                     Text("スプレッドシートを選択")
