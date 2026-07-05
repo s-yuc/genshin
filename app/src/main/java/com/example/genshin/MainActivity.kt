@@ -1,9 +1,12 @@
 package com.example.genshin
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,6 +37,22 @@ class MainActivity : ComponentActivity() {
         setContent {
             GenshinTheme {
                 var showImportDialog by remember { mutableStateOf(false) }
+                val context = LocalContext.current
+
+                // ファイルピッカーのランチャー設定
+                val filePickerLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.OpenDocument()
+                ) { uri: Uri? ->
+                    uri?.let {
+                        val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
+                            reader.readText()
+                        }
+                        if (content != null) {
+                            viewModel.importGachaResults(content)
+                            showImportDialog = false
+                        }
+                    }
+                }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -61,6 +81,10 @@ class MainActivity : ComponentActivity() {
                             onImport = { data ->
                                 viewModel.importGachaResults(data)
                                 showImportDialog = false
+                            },
+                            onPickFile = {
+                                // CSVやテキストファイルを選択可能にする
+                                filePickerLauncher.launch(arrayOf("text/*", "application/octet-stream"))
                             }
                         )
                     }
@@ -167,7 +191,7 @@ fun GachaItemCard(result: GachaResult) {
 }
 
 @Composable
-fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
+fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit, onPickFile: () -> Unit) {
     var text by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -176,16 +200,29 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
         text = {
             Column {
                 Text(
-                    text = "スプレッドシートやCSVから「何連、武器/キャラ、名称、日付」の列をコピーして貼り付けてください。",
+                    text = "スプレッドシートやCSVからコピーして貼り付けるか、ファイルを選択してください。",
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Button(
+                    onClick = onPickFile,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ファイルを選択 (CSV等)")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("または直接貼り付け:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                
                 TextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth().height(150.dp),
-                    placeholder = { Text("例: 75\tキャラ\t雷電将軍\t2024-01-01") }
+                    placeholder = { Text("例:\n75\tキャラ\t雷電将軍\t2024-01-01") }
                 )
             }
         },
