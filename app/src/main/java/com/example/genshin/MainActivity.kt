@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,7 +52,9 @@ class MainActivity : ComponentActivity() {
                 var showImportDialog by remember { mutableStateOf(false) }
                 val context = LocalContext.current
                 val sortOrder by viewModel.sortOrder.collectAsState()
+                val countMode by viewModel.countMode.collectAsState()
 
+                // ファイル選択用のランチャー
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
@@ -76,8 +80,16 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         CenterAlignedTopAppBar(
-                            title = { Text("原神ガチャ履歴記録", fontWeight = FontWeight.ExtraBold) },
+                            title = { Text("原神ガチャ記録", fontWeight = FontWeight.ExtraBold) },
                             actions = {
+                                // カウントモード切り替えボタン
+                                IconButton(onClick = { viewModel.toggleCountMode() }) {
+                                    Icon(
+                                        imageVector = if (countMode == GachaCountMode.PITY) Icons.Default.Refresh else Icons.Default.List,
+                                        contentDescription = "カウントモード切替"
+                                    )
+                                }
+                                // ソート順を切り替えるボタン
                                 IconButton(onClick = { viewModel.toggleSortOrder() }) {
                                     Icon(
                                         imageVector = if (sortOrder == SortOrder.DESCENDING) 
@@ -125,8 +137,7 @@ class MainActivity : ComponentActivity() {
             val types = resolver.getStreamTypes(uri, "text/csv")
             if (!types.isNullOrEmpty()) {
                 resolver.openTypedAssetFileDescriptor(uri, "text/csv", null)?.use { afd ->
-                    val text = afd.createInputStream().bufferedReader().use { it.readText() }
-                    if (text.isNotBlank()) return text
+                    return afd.createInputStream().bufferedReader().use { it.readText() }
                 }
             }
         } catch (e: Exception) { }
@@ -145,10 +156,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
     val results by viewModel.gachaResults.collectAsState()
+    val countMode by viewModel.countMode.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    // 画面全体の背景色は標準色に固定
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (results.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -167,7 +178,7 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(results) { result ->
-                        GachaItemCard(result)
+                        GachaItemCard(result, countMode)
                     }
                 }
 
@@ -197,7 +208,7 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
                     val visibleItemsCount = layoutInfo.visibleItemsInfo.size
                     if (totalItems > visibleItemsCount && visibleItemsCount > 0) {
                         val firstVisibleIndex = listState.firstVisibleItemIndex
-                        val barHeightFactor = (visibleItemsCount.toFloat() / totalItems.toFloat()).coerceAtLeast(0.15f)
+                        val barHeightFactor = (visibleItemsCount.toFloat() / totalItems.toFloat()).coerceIn(0.2f, 0.9f)
                         val barHeight = maxHeight * barHeightFactor
                         val scrollableRange = (totalItems - visibleItemsCount).coerceAtLeast(1)
                         val barOffset = (maxHeight - barHeight) * (firstVisibleIndex.toFloat() / scrollableRange.toFloat()).coerceIn(0f, 1f)
@@ -212,13 +223,15 @@ fun GachaListScreen(viewModel: GachaViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun GachaItemCard(result: GachaResult) {
-    // レアリティに応じたカードの背景色 (橙色と紫色)
+fun GachaItemCard(result: GachaResult, countMode: GachaCountMode) {
     val (gradientColors, starColor) = when (result.rarity) {
         5 -> listOf(Color(0xFFFFB74D), Color(0xFFF57C00)) to Color(0xFFFFEB3B) // 橙色
         4 -> listOf(Color(0xFFBA68C8), Color(0xFF7B1FA2)) to Color(0xFFE040FB) // 紫色
-        else -> listOf(Color(0xFF90A4AE), Color(0xFF546E7A)) to Color(0xFFCFD8DC) // 青灰色
+        else -> listOf(Color(0xFF90A4AE), Color(0xFF546E7A)) to Color(0xFFCFD8DC)
     }
+
+    // モードに応じて表示する数値を切り替え
+    val displayCount = if (countMode == GachaCountMode.PITY) result.pityCount else result.totalCount
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -235,7 +248,7 @@ fun GachaItemCard(result: GachaResult) {
                             Text(text = result.type, color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "${result.pullCount}連目", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(text = "${displayCount}連目", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -255,7 +268,7 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit, onPickFile: 
         title = { Text("データの取り込み") },
         text = {
             Column {
-                Text(text = "スプレッドシートを選択するか、内容を直接貼り付けてください。", fontSize = 12.sp)
+                Text(text = "Googleドライブ等のスプレッドシートを選択するか、内容を直接貼り付けてください。", fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = onPickFile, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
                     Text("スプレッドシートを選択")
