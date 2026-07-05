@@ -11,7 +11,7 @@ class GachaViewModel : ViewModel() {
 
     fun importGachaResults(input: String) {
         if (input.isBlank()) {
-            // サンプルデータ
+            // デモ用サンプルデータ
             _gachaResults.value = listOf(
                 GachaResult(90, "キャラ", "雷電将軍", "2024-01-01", 5),
                 GachaResult(10, "武器", "流浪楽章", "2024-01-01", 4),
@@ -26,37 +26,43 @@ class GachaViewModel : ViewModel() {
         val lines = input.trim().split("\n")
 
         for (line in lines) {
-            // カンマまたはタブで分割
-            val parts = if (line.contains("\t")) {
+            // タブまたはカンマで分割し、前後の空白や引用符(")を削除
+            val parts = (if (line.contains("\t")) {
                 line.split("\t")
             } else {
                 line.split(",")
-            }
+            }).map { it.trim().removeSurrounding("\"") }
 
             if (parts.size >= 4) {
                 try {
-                    val pullCount = parts[0].trim().toInt()
-                    val type = parts[1].trim()
-                    val name = parts[2].trim()
-                    val date = parts[3].trim()
+                    val pullCount = parts[0].toInt()
+                    val type = parts[1]
+                    val name = parts[2]
+                    val date = parts[3]
                     
-                    // レアリティ判定の簡易ロジック（本来はマスターデータが必要）
-                    // ここではデモ用に特定の名前や条件で判定
+                    // レアリティ判定ロジック
+                    // ガチャ結果の名前に基づいてレアリティを推測（本来はマスタデータが必要）
                     val rarity = when {
-                        name.contains("雷電") || name.contains("草薙") -> 5
-                        name.contains("ベネット") || name.contains("流浪") -> 4
+                        // 星5の例
+                        name.contains("雷電") || name.contains("ナヒーダ") || name.contains("草薙") || 
+                        name.contains("神里") || name.contains("鍾離") || name.contains("エウルア") -> 5
+                        // 星4の例
+                        name.contains("ベネット") || name.contains("流浪") || name.contains("行秋") || 
+                        name.contains("香菱") || name.contains("フィッシュル") -> 4
+                        // その他は星3
                         else -> 3
                     }
 
                     results.add(GachaResult(pullCount, type, name, date, rarity))
                 } catch (e: Exception) {
-                    // パース失敗した行はスキップ
+                    // 数値変換失敗（ヘッダー行など）は無視して次へ
                 }
             }
         }
 
         if (results.isNotEmpty()) {
-            _gachaResults.value = results
+            // 新しい順（日付降順）に並び替えてセット
+            _gachaResults.value = results.reversed()
         }
     }
 }

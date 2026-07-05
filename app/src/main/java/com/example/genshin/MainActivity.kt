@@ -2,6 +2,8 @@ package com.example.genshin
 
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,18 +43,24 @@ class MainActivity : ComponentActivity() {
                 var showImportDialog by remember { mutableStateOf(false) }
                 val context = LocalContext.current
 
-                // ファイル選択用のランチャー (Googleドライブ対応)
+                // ファイル選択用のランチャー
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
-                    uri?.let {
-                        val content = readTextFromUri(it)
-                        if (!content.isNullOrBlank()) {
+                    if (uri == null) return@rememberLauncherForActivityResult
+
+                    val content = readTextFromUri(uri)
+                    when (content) {
+                        "ERROR_EXCEL_BINARY" -> {
+                            Toast.makeText(context, "Excel(.xlsx)は直接読み込めません。Googleドライブ上で「Googleスプレッドシートとして保存」したファイルを選択するか、CSVで保存し直してください。", Toast.LENGTH_LONG).show()
+                        }
+                        null, "" -> {
+                            Toast.makeText(context, "取得失敗。左上のメニューから『Googleドライブ』を直接選び、ファイルを選択してみてください。", Toast.LENGTH_LONG).show()
+                        }
+                        else -> {
                             viewModel.importGachaResults(content)
-                            Toast.makeText(context, "取り込みが完了しました", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "インポート完了しました", Toast.LENGTH_SHORT).show()
                             showImportDialog = false
-                        } else {
-                            Toast.makeText(context, "ファイルの読み取りに失敗しました。CSV形式に書き出してから試してください。", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -86,15 +94,13 @@ class MainActivity : ComponentActivity() {
                                 showImportDialog = false
                             },
                             onPickFile = {
-                                // GoogleスプレッドシートやCSVを選択可能にする
+                                // 仮想ファイルを含め、あらゆる形式を選択対象にする
                                 filePickerLauncher.launch(arrayOf(
-                                    "text/csv",
-                                    "text/comma-separated-values",
+                                    "text/*",
+                                    "application/vnd.google-apps.spreadsheet",
                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     "application/vnd.ms-excel",
-                                    "application/vnd.google-apps.spreadsheet",
-                                    "text/plain",
-                                    "*/*"
+                                    "application/octet-stream"
                                 ))
                             }
                         )
@@ -105,35 +111,48 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Googleスプレッドシートなどの仮想ドキュメントを読み込むための処理。
-     * 仮想ファイルの場合はCSVとしてストリームを取得し、テキストとして読み取ります。
+     * URIからテキストを読み込む。
+     * Googleスプレッドシートのような仮想ドキュメントをCSVとして引き出す処理を強化。
      */
     private fun readTextFromUri(uri: Uri): String? {
         val resolver = contentResolver
-        return try {
-            // スプレッドシートをCSV形式で取得できるか確認
-            val streamTypes = resolver.getStreamTypes(uri, "text/*")
-            val isVirtual = streamTypes?.contains("text/csv") == true || 
-                        streamTypes?.contains("text/comma-separated-values") == true
-
-            val inputStream: InputStream? = if (isVirtual) {
-                // CSV形式でのエクスポートを試みる
-                resolver.openTypedAssetFileDescriptor(uri, "text/csv", null)?.createInputStream()
-                    ?: resolver.openTypedAssetFileDescriptor(uri, "text/comma-separated-values", null)?.createInputStream()
-            } else {
-                // 通常のファイルとして開く
-                resolver.openInputStream(uri)
+        
+        // 1. まず、Googleドライブ側の変換機能(CSVエクスポート)を試みる
+        try {
+            val types = resolver.getStreamTypes(uri, "text/csv")
+            if (!types.isNullOrEmpty()) {
+                resolver.openTypedAssetFileDescriptor(uri, "text/csv", null)?.use { afd ->
+                    val text = afd.createInputStream().bufferedReader().use { it.readText() }
+                    if (text.isNotBlank()) return text
+                }
             }
-
-            inputStream?.bufferedReader()?.use { it.readText() }
         } catch (e: Exception) {
-            e.printStackTrace()
-            // 最終手段：通常のインプットストリームとして試行
-            try {
-                resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            } catch (e2: Exception) {
-                null
+            Log.e("Genshin", "CSV export attempt failed: ${e.message}")
+        }
+
+        // 2. CSVがダメなら、プレーンテキストとしてのエクスポートを試みる
+        try {
+            val types = resolver.getStreamTypes(uri, "text/plain")
+            if (!types.isNullOrEmpty()) {
+                resolver.openTypedAssetFileDescriptor(uri, "text/plain", null)?.use { afd ->
+                    val text = afd.createInputStream().bufferedReader().use { it.readText() }
+                    if (text.isNotBlank()) return text
+                }
             }
+        } catch (e: Exception) {
+            Log.e("Genshin", "Text export attempt failed: ${e.message}")
+        }
+
+        // 3. 通常のファイルストリームとしての読み込み
+        return try {
+            resolver.openInputStream(uri)?.use { stream ->
+                val text = stream.bufferedReader().use { it.readText() }
+                // XLSXなどのZIPバイナリ(先頭がPK)を検知
+                if (text.startsWith("PK")) "ERROR_EXCEL_BINARY" else text
+            }
+        } catch (e: Exception) {
+            Log.e("Genshin", "Standard stream attempt failed: ${e.message}")
+            null
         }
     }
 }
@@ -224,8 +243,8 @@ fun GachaItemCard(result: GachaResult) {
                     )
                     Text(
                         text = result.date,
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -259,7 +278,7 @@ fun ImportDialog(
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("Googleドライブ / ファイルを選択")
+                    Text("スプレッドシートを選択 (Googleドライブ)")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
