@@ -1,18 +1,43 @@
 package com.example.genshin
 
 import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.*
+
+enum class SortOrder {
+    ASCENDING, DESCENDING
+}
 
 class GachaViewModel : ViewModel() {
-    private val _gachaResults = MutableStateFlow<List<GachaResult>>(emptyList())
-    val gachaResults: StateFlow<List<GachaResult>> = _gachaResults.asStateFlow()
+    private val _rawGachaResults = MutableStateFlow<List<GachaResult>>(emptyList())
+    private val _sortOrder = MutableStateFlow(SortOrder.DESCENDING)
+    
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
+
+    // 読み込んだデータとソート順を合成して、常に最新のリストを表示用に公開する
+    val gachaResults: StateFlow<List<GachaResult>> = combine(_rawGachaResults, _sortOrder) { results, order ->
+        when (order) {
+            SortOrder.ASCENDING -> results.sortedBy { it.pullCount }
+            SortOrder.DESCENDING -> results.sortedByDescending { it.pullCount }
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    fun toggleSortOrder() {
+        _sortOrder.value = if (_sortOrder.value == SortOrder.DESCENDING) {
+            SortOrder.ASCENDING
+        } else {
+            SortOrder.DESCENDING
+        }
+    }
 
     fun importGachaResults(input: String) {
         if (input.isBlank()) {
             // デモ用サンプルデータ
-            _gachaResults.value = listOf(
+            _rawGachaResults.value = listOf(
                 GachaResult(90, "キャラ", "雷電将軍", "2024-01-01", 5),
                 GachaResult(10, "武器", "流浪楽章", "2024-01-01", 4),
                 GachaResult(1, "武器", "冷刃", "2024-01-01", 3),
@@ -23,46 +48,49 @@ class GachaViewModel : ViewModel() {
         }
 
         val results = mutableListOf<GachaResult>()
-        val lines = input.trim().split("\n")
+        val lines = input.split(Regex("\\R"))
 
         for (line in lines) {
-            // タブまたはカンマで分割し、前後の空白や引用符(")を削除
-            val parts = (if (line.contains("\t")) {
-                line.split("\t")
-            } else {
-                line.split(",")
-            }).map { it.trim().removeSurrounding("\"") }
+            val trimmedLine = line.trim()
+            if (trimmedLine.isEmpty()) continue
 
-            if (parts.size >= 4) {
-                try {
-                    val pullCount = parts[0].toInt()
-                    val type = parts[1]
-                    val name = parts[2]
-                    val date = parts[3]
-                    
-                    // レアリティ判定ロジック
-                    // ガチャ結果の名前に基づいてレアリティを推測（本来はマスタデータが必要）
-                    val rarity = when {
-                        // 星5の例
-                        name.contains("雷電") || name.contains("ナヒーダ") || name.contains("草薙") || 
-                        name.contains("神里") || name.contains("鍾離") || name.contains("エウルア") -> 5
-                        // 星4の例
-                        name.contains("ベネット") || name.contains("流浪") || name.contains("行秋") || 
-                        name.contains("香菱") || name.contains("フィッシュル") -> 4
-                        // その他は星3
-                        else -> 3
-                    }
-
-                    results.add(GachaResult(pullCount, type, name, date, rarity))
-                } catch (e: Exception) {
-                    // 数値変換失敗（ヘッダー行など）は無視して次へ
-                }
+            val parts = trimmedLine.split(Regex("[,\t]")).map { 
+                it.trim().removeSurrounding("\"").trim() 
             }
-        }
 
+            // キャラ名（2つめの項目）がブランクのものは取り込まない
+            if (parts.size < 2 || parts[1].isBlank()) continue
+
+            try {
+                val pullCount = parts[0].toIntOrNull() ?: continue
+                
+                val col2 = parts[1]
+                val col3 = if (parts.size >= 3) parts[2] else ""
+                val col4 = if (parts.size >= 4) parts[3] else ""
+
+                var type: String; var name: String; var date: String
+
+                if (col2 == "キャラ" || col2 == "武器" || col2 == "キャラクター") {
+                    if (col3.isBlank()) continue
+                    type = col2; name = col3; date = col4
+                } else {
+                    name = col2
+                    type = if (col3.isNotBlank() && !col3.contains(Regex("\\d{4}"))) col3 else "不明"
+                    date = if (col4.isNotBlank()) col4 else if (col3.contains(Regex("\\d{4}"))) col3 else ""
+                }
+
+                if (name.isBlank()) continue
+
+                val rarity = when {
+                    name.contains(Regex("雷電|ナヒーダ|鍾離|フリーナ|ヌヴィレット|神里|万葉|胡桃|夜蘭|エウルア|シロネン|ムアラニ|キィニチ|マーヴィカ|クロリンデ|草薙|飛雷|萃光|若水|赤砂")) -> 5
+                    name.contains(Regex("ベネット|行秋|香菱|久岐忍|シュヴルーズ|ファルザン|カチーナ|嘉明|セトス|流浪|祭礼|西風")) -> 4
+                    else -> 3
+                }
+                results.add(GachaResult(pullCount, type, name, date, rarity))
+            } catch (e: Exception) {}
+        }
         if (results.isNotEmpty()) {
-            // 新しい順（日付降順）に並び替えてセット
-            _gachaResults.value = results.reversed()
+            _rawGachaResults.value = results
         }
     }
 }
