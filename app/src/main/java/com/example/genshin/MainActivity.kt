@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         CenterAlignedTopAppBar(
-                            title = { Text("原神ガチャ履歴", fontWeight = FontWeight.ExtraBold) },
+                            title = { Text("原神ガチャ履歴記録", fontWeight = FontWeight.ExtraBold) },
                             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant
                             )
@@ -119,7 +119,7 @@ fun GachaItemCard(result: GachaResult) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = result.name,
                         color = Color.White,
@@ -127,15 +127,24 @@ fun GachaItemCard(result: GachaResult) {
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = result.type,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = result.type,
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            text = "${result.pullCount}連目",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -167,7 +176,7 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
         text = {
             Column {
                 Text(
-                    text = "ガチャ結果を貼り付けてください（空のままインポートするとサンプルデータが表示されます）",
+                    text = "スプレッドシートやCSVから「何連、武器/キャラ、名称、日付」の列をコピーして貼り付けてください。",
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
@@ -176,7 +185,7 @@ fun ImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth().height(150.dp),
-                    placeholder = { Text("ここにデータをペースト...") }
+                    placeholder = { Text("例: 75\tキャラ\t雷電将軍\t2024-01-01") }
                 )
             }
         },
